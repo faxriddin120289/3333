@@ -6,6 +6,7 @@ import os
 import re
 import sqlite3
 import threading
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 import time
 import unicodedata
 from dataclasses import dataclass
@@ -35,8 +36,8 @@ SCAN_LOCK = threading.Lock()
 DEFAULT_KEYWORDS = ['burg', 'бур', 'скважин', 'bvr', 'бвр', 'взрыв', 'portlat', 'karyer', 'карьер', 'геолог', 'буров', 'quduq']
 # Only publicly accessible listing pages. Pages may change their markup or access policy.
 SOURCES = {
-    'etender': ('UZEX eTender', 'https://etender.uzex.uz/civil-failed-list'),
-    'xarid': ('UZEX xarid', 'https://xarid.uzex.uz/request-proposal/3/list'),
+    'etender': ('UZEX eTender', 'https://etender.uzex.uz/'),
+    'xarid': ('UZEX xarid', 'https://xarid.uzex.uz/'),
 }
 
 @dataclass(frozen=True)
@@ -127,20 +128,66 @@ def parse_table(source, url, soup):
     return lots
 
 
+def parse_cards(source, url, soup):
+    """Read publicly visible UZEX lot cards without treating navigation as lots."""
+    result = []
+    for node in soup.select('a, article, div'):
+        text = node.get_text(' ', strip=True)
+        if len(text) > 1200 or len(text) < 35:
+            continue
+        number = re.search(r'(?:Lot raqami|Номер лота|Lot number)\\s*:?\\s*(\\d{8,20})', text, re.I)
+        if not number:
+            continue
+        # Reject parent containers holding several cards.
+        if len(re.findall(r'(?:Lot raqami|Номер лота|Lot number)', text, re.I)) != 1:
+            continue
+        title = re.search(r'(?:Lot raqami|Номер лота|Lot number)\\s*:?\\s*\\d{8,20}\\s*(.*?)(?:Boshlang.?ich narx|Начальная цена|Tugash sanasi|Дата окончания|$)', text, re.I)
+        name = (title.group(1) if title else '').strip(' :-')
+        if len(name) < 5:
+            continue
+        a = node if node.name == 'a' else node.select_one('a[href]')
+        link = urljoin(url, a.get('href', '')) if a else url
+        if urlparse(link).netloc not in ('etender.uzex.uz', 'xarid.uzex.uz'):
+            link = url
+        amount = re.search(r'(?:Boshlang.?ich narx|Начальная цена)\\s*:?\\s*([\\d ,.]+\\s*(?:UZS|сум)?)', text, re.I)
+        deadline = re.search(r'(?:Tugash sanasi|Дата окончания)\\s*:?\\s*([\\d.: /-]+)', text, re.I)
+        result.append(Lot(source, name[:600], link, number.group(1),
+                          amount.group(1).strip() if amount else '',
+                          deadline.group(1).strip() if deadline else '', ''))
+    return list({lot_key(x): x for x in result}.values())
+
+
 def fetch_source(key):
     name, url = SOURCES[key]
+    errors = []
     try:
         response = http.get(url, timeout=TIMEOUT)
         response.raise_for_status()
         soup = BeautifulSoup(response.text, 'html.parser')
-        lots = parse_table(key, url, soup)
-        if not lots:
-            return [], f'{name}: sahifa ochildi, lekin lotlar jadvali topilmadi (sayt JavaScript bilan yuklanishi mumkin).'
-        return lots, None
+        lots = parse_table(key, url, soup) + parse_cards(key, url, soup)
+        if lots:
+            return list({lot_key(x): x for x in lots}.values()), None
     except requests.RequestException as exc:
-        log.warning('Source error %s: %s', key, exc)
-        return [], f'{name}: ulanish xatosi ({type(exc).__name__}).'
-
+        errors.append(f'HTTP: {type(exc).__name__}')
+    # Render JS apps can have empty initial HTML. Render them with Chromium.
+    try:
+        from playwright.sync_api import sync_playwright
+        with sync_playwright() as p:
+            browser = p.chromium.launch(headless=True, args=['--no-sandbox', '--disable-dev-shm-usage'])
+            page = browser.new_page(locale='uz-UZ', viewport={'width': 1280, 'height': 900})
+            page.goto(url, wait_until='domcontentloaded', timeout=45000)
+            page.wait_for_timeout(9000)
+            html_text = page.content()
+            browser.close()
+        soup = BeautifulSoup(html_text, 'html.parser')
+        lots = parse_table(key, url, soup) + parse_cards(key, url, soup)
+        if lots:
+            return list({lot_key(x): x for x in lots}.values()), None
+        errors.append('JavaScript sahifasi ochildi, ammo lotlar olinmadi (API, filtr yoki himoya sababli)')
+    except Exception as exc:
+        log.exception('Browser fetch failed for %s', key)
+        errors.append(f'Chromium: {type(exc).__name__}')
+    return [], f'{name}: ' + '; '.join(errors)
 
 def collect(keys=None):
     found, errors = [], []
@@ -277,8 +324,28 @@ def monitor():
             except Exception: log.exception('Monitor failed for %s', chat_id)
 
 
+class HealthHandler(BaseHTTPRequestHandler):
+    def do_GET(self):
+        if self.path not in ('/', '/health'):
+            self.send_error(404)
+            return
+        self.send_response(200)
+        self.send_header('Content-Type', 'text/plain; charset=utf-8')
+        self.end_headers()
+        self.wfile.write(b'Tender monitor process is running; source health is reported in Telegram.')
+
+    def log_message(self, *_args):
+        pass
+
+
+def run_health_server():
+    port = int(os.getenv('PORT', '10000'))
+    ThreadingHTTPServer(('0.0.0.0', port), HealthHandler).serve_forever()
+
+
 if __name__ == '__main__':
     init_db()
+    threading.Thread(target=run_health_server, daemon=True).start()
     threading.Thread(target=monitor, daemon=True).start()
     log.info('Tender monitor started; %s minute interval', INTERVAL)
     bot.remove_webhook()

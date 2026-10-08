@@ -1,0 +1,1 @@
+services:\n  - type: web\n    name: tender-monitor\n    runtime: python\n    plan: free\n    buildCommand: pip install -r requirements.txt && python -m playwright install chromium\n    startCommand: python bot.py\n    healthCheckPath: /health\n    envVars:\n      - key: BOT_TOKEN\n        sync: false\n      - key: CHECK_INTERVAL_MINUTES\n        value: "60"\n
