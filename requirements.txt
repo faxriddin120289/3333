@@ -1,1 +1,2 @@
-pyTelegramBotAPI==4.37.0\npython-dotenv>=1.0,<2\nrequests>=2.32,<3\nbeautifulsoup4>=4.12,<5\nplaywright==1.55.0\n
+pyTelegramBotAPI>=4.20,<5
+requests>=2.32,<3
