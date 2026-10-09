@@ -18,7 +18,7 @@ def run_flask():
     app.run(host='0.0.0.0', port=port)
 
 # 2. Telegram Bot sozlamalari
-TOKEN = "YOUR_BOT_TOKEN_HERE"  # BotFather'dan olingan tokenni yozing
+TOKEN = "8886515862:AAEZdaCl7JSgTqa2m17xGfwzy4Ds8QxbYY8"  # BotFather'dan olingan tokenni yozing
 bot = telebot.TeleBot(TOKEN)
 
 # 3. etender.uzex.uz saytidan qidiruv funksiyasi
