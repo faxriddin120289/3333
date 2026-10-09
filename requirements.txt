@@ -1,4 +1,4 @@
-PyTelegramBotAPI
+pyTelegramBotAPI
 requests
-beautifulsoup4
 flask
+playwright
