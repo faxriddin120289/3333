@@ -1,3 +1,4 @@
 pyTelegramBotAPI
-curl_cffi
+requests
+beautifulsoup4
 flask
