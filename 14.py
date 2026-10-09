@@ -4,7 +4,7 @@ from bs4 import BeautifulSoup
 import telebot
 
 # Telegram botingiz tokeni
-TOKEN = "YOUR_BOT_TOKEN_HERE"
+TOKEN = "8886515862:AAEZdaCl7JSgTqa2m17xGfwzy4Ds8QxbYY8"
 bot = telebot.TeleBot(TOKEN)
 
 def search_etender_html(keyword: str):
